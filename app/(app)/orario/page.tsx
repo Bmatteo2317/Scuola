@@ -175,6 +175,59 @@ export default async function OrarioPage({
         </div>
       )}
 
+      <section className="card" style={{ marginBottom: 18, marginTop: 16 }}>
+        <div className="card-head">
+          <h2 className="card-title">Imposta orario settimanale</h2>
+          <p className="tiny muted">
+            Definisci quante ore di scuola hai ogni giorno e l'orario di inizio. La fine sarà calcolata automaticamente.
+          </p>
+        </div>
+        <form action={setWeeklySchedule} className="stack">
+          {WEEKDAY_NAMES.map((name, index) => {
+            const weekday = index + 1;
+            const dayLessons = lessons.filter((lesson) => lesson.weekday === weekday);
+            const hasExisting = dayLessons.length > 0;
+            const existingHours = hasExisting ? Math.round((dayLessons[0].end_time.split(":")[0] * 60 + Number.parseInt(dayLessons[0].end_time.split(":")[1], 10) - (dayLessons[0].start_time.split(":")[0] * 60 + Number.parseInt(dayLessons[0].start_time.split(":")[1], 10)) / 60) : 1;
+            return (
+              <div key={weekday} style={{ marginBottom: 12 }}>
+                <label className="field grow">
+                  <span>{name}</span>
+                </label>
+                <select className="select" name={`subject_${weekday}`} defaultValue={hasExisting ? dayLessons[0].subject_id : ""}>
+                  <option value="">Scegli materia</option>
+                  {subjects.map((subject) => (
+                    <option key={subject.id} value={subject.id}>
+                      {subject.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="row-form" style={{ marginTop: 6 }}>
+                  <label className="field grow">
+                    <span>Ore</span>
+                    <select className="select" name={`hours_${weekday}`}>
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((h) => (
+                        <option key={h} value={h} ${h === (hasExisting ? existingHours : 1) ? "selected" : ""}>
+                          {h} ora{' ' + (h > 1 ? "ore" : "ora")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field grow" style={{ marginTop: 6 }}>
+                    <span>Dalle</span>
+                    <input className="input" type="time" name={`start_${weekday}`} defaultValue={hasExisting ? dayLessons[0].start_time : "08:00"} />
+                  </label>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ textAlign: "right", marginTop: 16 }}>
+            <button className="btn btn-primary" type="submit">
+              Salva orario settimanale
+            </button>
+          </div>
+        </form>
+      </section>
+
       <div className="grid grid-auto">
         {WEEKDAY_NAMES.map((name, index) => {
           const weekday = index + 1;
