@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+.tools/
+.env
+.env.local
+.env*.local
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+.DS_Store
+.neon
+*.log
+.freebuff/
