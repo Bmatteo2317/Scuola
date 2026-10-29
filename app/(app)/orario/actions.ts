@@ -82,9 +82,9 @@ export async function setWeeklySchedule(formData: FormData) {
       const startTime = `${startH.padStart(2, "0")}:${startM}`;
       const endTime = `${endH.padStart(2, "0")}:${endM}`;
 
-      // Usa il template tag db con la stessa sintassi di addLesson
-      await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
-                 values (${user.id}, ${day.selectedSubjectIds[i]}, ${day.weekday}, ${startTime}::time, ${endTime}::time)`;
+      // Inserisci usando raw query per evitare limiti del template tag
+      const sql = 'insert into lessons (user_id, subject_id, weekday, start_time, end_time) values (' + user.id + ', ' + day.selectedSubjectIds[i] + ', ' + day.weekday + ', ' + startTime + '::time, ' + endTime + '::time)');
+      await db.raw(sql);
     }
   }
     }
