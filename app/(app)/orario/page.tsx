@@ -187,7 +187,9 @@ export default async function OrarioPage({
             const weekday = index + 1;
             const dayLessons = lessons.filter((lesson) => lesson.weekday === weekday);
             const hasExisting = dayLessons.length > 0;
-            const existingHours = hasExisting ? Math.round((dayLessons[0].end_time.split(":")[0] * 60 + Number.parseInt(dayLessons[0].end_time.split(":")[1], 10) - (dayLessons[0].start_time.split(":")[0] * 60 + Number.parseInt(dayLessons[0].start_time.split(":")[1], 10)) / 60) : 1;
+            const startMin = hasExisting ? Number.parseInt(dayLessons[0].start_time.split(":")[1], 10) : 0;
+            const endMin = hasExisting ? Number.parseInt(dayLessons[0].end_time.split(":")[1], 10) : 0;
+            const existingHours = hasExisting ? Math.round((Number.parseInt(dayLessons[0].end_time.split(":")[0], 10) * 60 + endMin - (Number.parseInt(dayLessons[0].start_time.split(":")[0], 10) * 60 + startMin)) / 60) : 1;
             return (
               <div key={weekday} style={{ marginBottom: 12 }}>
                 <label className="field grow">
