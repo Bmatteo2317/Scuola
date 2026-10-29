@@ -71,8 +71,22 @@ export async function setWeeklySchedule(formData: FormData) {
       const startTime = `${startH.padStart(2, "0")}:${startM}`;
       const endTime = `${endH.padStart(2, "0")}:${endM}`;
 
+      // Inserisci le nuove lezioni basate sulla griglia selezionata
+  for (const day of daysSchedule) {
+    for (let i = 0; i < day.selectedSubjectIds.length; i++) {
+      // Lo slot orario corrispondente: slotIdx 0 = 07:00-08:00, slotIdx 1 = 08:00-09:00, ecc.
+      const slotIdx = i; // i-esimo slot selezionato per questo giorno
+      const [startH, startM] = HOUR_SLOTS[slotIdx].split(":")[0].split("-");
+      const [endH, endM] = HOUR_SLOTS[slotIdx].split(":")[1].split("-");
+
+      const startTime = `${startH.padStart(2, "0")}:${startM}`;
+      const endTime = `${endH.padStart(2, "0")}:${endM}`;
+
+      // Usa il template tag db con la stessa sintassi di addLesson
       await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
                  values (${user.id}, ${day.selectedSubjectIds[i]}, ${day.weekday}, ${startTime}::time, ${endTime}::time)`;
+    }
+  }
     }
   }
 
