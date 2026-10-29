@@ -10,65 +10,89 @@ function refresh() {
   revalidatePath("/", "layout");
 }
 
-/** Imposta l'orario settimanale: per ogni giorno della settimana (1-7) specifica:
- *  - quante ore di scuola vuoi (es. 1, 2, 3, 4 ore)
- *  - l'orario di inizio (es. 08:00)
- *  - l'orario di fine (verrà calcolato in base alle ore + inizio)
- * Sostituisce tutte le lezioni esistenti con i nuovi orari.
+/** Imposta l'orario settimanale usando blocchi fissi di 1 ora.
+ * Per ogni giorno (lun-dom) l'utente può selezionare quali ore scolastiche avere
+ * e assegnare una materia a ciascun slot orario.
+ * Gli slot sono: 07:00-08:00, 08:00-09:00, 09:00-10:00, 10:00-11:00, 11:00-12:00,
+ * 12:00-13:00, 13:00-14:00, 14:00-15:00, 15:00-16:00, 16:00-17:00.
+ * Vengono cancellate tutte le lezioni esistenti e sostituite con la nuova griglia.
  */
 export async function setWeeklySchedule(formData: FormData) {
   const user = await requireUser();
 
-  // Giorni della settimana: lun=1, mar=2, mer=3, gio=4, ven=5, sab=6, dom=7
-  const days: Array<{ weekday: number; hours: number; start_time: string }> = [];
+  // Ore disponibili nella giornata scolastica (7:00 - 17:00 = 10 slot)
+  const HOUR_SLOTS = [
+    "07:00-08:00",
+    "08:00-09:00",
+    "09:00-10:00",
+    "10:00-11:00",
+    "11:00-12:00",
+    "12:00-13:00",
+    "13:00-14:00",
+    "14:00-15:00",
+    "15:00-16:00",
+    "16:00-17:00",
+  ];
+
+  // Costruisci la griglia: per ogni giorno, quali slot sono selezionati e con quale materia
+  const daysSchedule: Array<{
+    weekday: number;
+    selectedSubjectIds: string[]; // ID delle materie selezionate per gli slot attivi
+  }> = [];
 
   for (let wd = 1; wd <= 7; wd++) {
-    const hours = Number(str(formData.get(`hours_${wd}`)));
-    const start = str(formData.get(`start_${wd}`));
+    const selectedSubjectIds: string[] = [];
 
-    days.push({
+    // Per ciascuno slot orario, controlla se è stato selezionato una materia
+    for (let slotIdx = 0; slotIdx < HOUR_SLOTS.length; slotIdx++) {
+      const subjectId = uuidOrNull(formData.get(`subject_${wd}_${slotIdx}`));
+      if (subjectId) {
+        selectedSubjectIds.push(subjectId);
+      }
+    }
+
+    daysSchedule.push({
       weekday: wd,
-      hours: hours || 0,
-      start_time: start,
+      selectedSubjectIds,
     });
   }
 
   // Elimina tutte le lezioni esistenti per questo utente
   await db()`delete from lessons where user_id = ${user.id}`;
 
-  // Inserisci i nuovi blocchi orari per ogni giorno
-  for (const day of days) {
-    if (day.hours <= 0 || !/^\d{2}:\d{2}$/.test(day.start_time)) {
-      continue;
+  // Inserisci le nuove lezioni basate sulla griglia selezionata
+  for (const day of daysSchedule) {
+    for (let i = 0; i < day.selectedSubjectIds.length; i++) {
+      // Lo slot orario corrispondente: slotIdx 0 = 07:00-08:00, slotIdx 1 = 08:00-09:00, ecc.
+      const slotIdx = i; // i-esimo slot selezionato per questo giorno
+      const [startH, startM] = HOUR_SLOTS[slotIdx].split(":")[0].split("-");
+      const [endH, endM] = HOUR_SLOTS[slotIdx].split(":")[1].split("-");
+
+      const startTime = `${startH.padStart(2, "0")}:${startM}`;
+      const endTime = `${endH.padStart(2, "0")}:${endM}`;
+
+      await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
+                 values (${user.id}, ${day.selectedSubjectIds[i]}, ${day.weekday}, ${startTime}::time, ${endTime}::time)`;
     }
-
-    // Calcola la fine: ore * 60 minuti dall'inizio
-    const [sh, sm] = day.start_time.split(":").map(Number);
-    const totalMinutes = sh * 60 + + Number.parseInt(day.start_time.split(":")[1], 10) + day.hours * 60;
-    const endHours = Math.floor(totalMinutes / 60);
-    const endMinutes = totalMinutes % 60;
-    const end_time = `${String(endHours).padStart(2, "0")}:${String(endMinutes).padStart(2, "0")}`;
-
-    await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
-               values (${user.id}, ${null}, ${day.weekday}, ${day.start_time}::time, ${end_time}::time)`;
   }
 
   refresh();
   redirect("/orario");
 }
 
+/** Aggiunge una lezione singola (non sostituisce l'orario settimanale). */
 export async function addLesson(formData: FormData) {
   const user = await requireUser();
   const subjectId = uuidOrNull(formData.get("subject_id"));
   const weekday = Number(str(formData.get("weekday")));
   const start = str(formData.get("start_time"));
-  const hours = Number(str(formData.get("hours"))) || 1;
+  const end = str(formData.get("end_time"));
 
   if (!subjectId || !Number.isInteger(weekday) || weekday < 1 || weekday > 7) {
     redirect("/orario");
   }
-  if (!/^\d{2}:\d{2}$/.test(start)) {
-    redirect("/orario");
+  if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end) || end <= start) {
+    redirect("/orario?err=orario");
   }
 
   const subject = await row<{ id: string }>(
@@ -76,15 +100,8 @@ export async function addLesson(formData: FormData) {
   );
   if (!subject) redirect("/orario");
 
-  // Calcola la fine basandosi sulle ore
-  const [sh, sm] = start.split(":").map(Number);
-  const totalMinutes = sh * 60 + + Number.parseInt(start.split(":")[1], 10) + hours * 60;
-  const endHours = Math.floor(totalMinutes / 60);
-  const endMinutes = totalMinutes % 60;
-  const end_time = `${String(endHours).padStart(2, "0")}:${String(endMinutes).padStart(2, "0")}`;
-
   await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
-             values (${user.id}, ${subjectId}, ${weekday}, ${start}::time, ${end_time}::time)`;
+             values (${user.id}, ${subjectId}, ${weekday}, ${start}::time, ${end}::time)`;
   refresh();
   redirect("/orario");
 }
