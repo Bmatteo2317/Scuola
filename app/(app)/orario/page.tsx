@@ -208,7 +208,7 @@ export default async function OrarioPage({
                     <span>Ore</span>
                     <select className="select" name={`hours_${weekday}`}>
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((h) => (
-                        <option key={h} value={h} ${h === (hasExisting ? existingHours : 1) ? "selected" : ""}>
+                        <option key={h} value={h} selected={h === (hasExisting ? existingHours : 1)}>
                           {h} ora{' ' + (h > 1 ? "ore" : "ora")}
                         </option>
                       ))}
