@@ -10,77 +10,57 @@ function refresh() {
   revalidatePath("/", "layout");
 }
 
-/** Imposta l'orario settimanale usando una griglia timetable.
- *  Per ogni giorno (lun-dom) l'utente può selezionare quali ore scolastiche avere
- *  e assegnare una materia a ciascun blocco orario.
- *  La tabella mostra i blocchi orari 07:00-17:00 per ciascun giorno.
- *  Vengono cancellate tutte le lezioni esistenti e sostituite con la nuova griglia.
- */
-export async function setWeeklySchedule(formData: FormData) {
+type TimetableCell = { weekday: number; slot: number; subjectId: string };
+
+function timeLabel(minutes: number): string {
+  const hours = Math.floor(minutes / 60) % 24;
+  const rest = minutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+}
+
+/** Salva la tabella orario: ogni cella piena (giorno + slot) diventa una lezione di 1 ora. */
+export async function saveTimetable(payload: {
+  start: string;
+  cells: TimetableCell[];
+}) {
   const user = await requireUser();
+  const start = /^\d{2}:\d{2}$/.test(payload.start) ? payload.start : "08:00";
 
-  // Ore disponibili nella giornata scolastica (7:00 - 17:00 = 10 slot, ma userà 8 righe)
-  const HOUR_SLOTS = [
-    "07:00-08:00",
-    "08:00-09:00",
-    "09:00-10:00",
-    "10:00-11:00",
-    "11:00-12:00",
-    "12:00-13:00",
-    "13:00-14:00",
-    "14:00-15:00",
-    "15:00-16:00",
-    "16:00-17:00",
-  ];
-
-  // Costruisci la griglia: per ogni giorno, quali slot sono selezionati e con quale materia
-  const daysSchedule: Array<{
-    weekday: number;
-    selectedSubjectIds: string[]; // ID delle materie selezionate per gli slot attivi
-  }> = [];
-
-  for (let wd = 1; wd <= 7; wd++) {
-    const selectedSubjectIds: string[] = [];
-
-    // Per ciascuno slot orario, controlla se è stato selezionato una materia
-    for (let slotIdx = 0; slotIdx < HOUR_SLOTS.length; slotIdx++) {
-      const subjectId = uuidOrNull(formData.get(`subject_${wd}_${slotIdx}`));
-      if (subjectId) {
-        selectedSubjectIds.push(subjectId);
-      }
-    }
-
-    daysSchedule.push({
-      weekday: wd,
-      selectedSubjectIds,
-    });
+  // Verifica che le materie appartengano all'utente.
+  const subjectIds = Array.from(new Set(payload.cells.map((cell) => cell.subjectId))).filter(
+    Boolean,
+  );
+  const allowed = new Set<string>();
+  for (const subjectId of subjectIds) {
+    const subject = await row<{ id: string }>(
+      db()`select id from subjects where id = ${subjectId} and user_id = ${user.id}`,
+    );
+    if (subject) allowed.add(subject.id);
   }
 
-  // Elimina tutte le lezioni esistenti per questo utente
-  await db`delete from lessons where user_id = ${user.id}`;
+  const [startH, startM] = start.split(":").map(Number);
+  const base = (startH || 0) * 60 + (startM || 0);
 
-  // Inserisci le nuove lezioni basate sulla griglia selezionata
-  for (const day of daysSchedule) {
-    for (let i = 0; i < day.selectedSubjectIds.length; i++) {
-      // Lo slot orario corrispondente: slotIdx 0 = 07:00-08:00, slotIdx 1 = 08:00-09:00, ecc.
-      const slotIdx = i; // i-esimo slot selezionato per questo giorno
-      const [startH, startM] = HOUR_SLOTS[slotIdx].split(":")[0].split("-");
-      const [endH, endM] = HOUR_SLOTS[slotIdx].split(":")[1].split("-");
+  await db()`delete from lessons where user_id = ${user.id}`;
 
-      const startTime = `${startH.padStart(2, "0")}:${startM}`;
-      const endTime = `${endH.padStart(2, "0")}:${endM}`;
+  for (const cell of payload.cells) {
+    if (!allowed.has(cell.subjectId)) continue;
+    if (!Number.isInteger(cell.weekday) || cell.weekday < 1 || cell.weekday > 7) continue;
+    if (!Number.isInteger(cell.slot) || cell.slot < 0 || cell.slot > 23) continue;
 
-      // Costruisci la query separatamente per evitare troppi placeholder nel template tag
-      const query = db`insert into lessons (user_id, subject_id, weekday, start_time, end_time) values (${user.id}, ${day.selectedSubjectIds[i]}, ${day.weekday}, ${startTime}::time, ${endTime}::time)`;
-      await query;
-    }
+    const begin = base + cell.slot * 60;
+    const end = begin + 60;
+    const startTime = timeLabel(begin);
+    const endTime = timeLabel(end);
+
+    await db()`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
+             values (${user.id}, ${cell.subjectId}, ${cell.weekday}, ${startTime}::time, ${endTime}::time)`;
   }
 
   refresh();
-  redirect("/orario");
 }
 
-/** Aggiunge una lezione singola (non sostituisce l'orario settimanale). */
+/** Aggiunge una lezione singola (non tocca il resto dell'orario). */
 export async function addLesson(formData: FormData) {
   const user = await requireUser();
   const subjectId = uuidOrNull(formData.get("subject_id"));
@@ -95,14 +75,12 @@ export async function addLesson(formData: FormData) {
     redirect("/orario?err=orario");
   }
 
-  const subject = await row<
-    { id: string }
-  >(
-    db`select id from subjects where id = ${subjectId} and user_id = ${user.id}`,
+  const subject = await row<{ id: string }>(
+    db()`select id from subjects where id = ${subjectId} and user_id = ${user.id}`,
   );
   if (!subject) redirect("/orario");
 
-  await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
+  await db()`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
            values (${user.id}, ${subjectId}, ${weekday}, ${start}::time, ${end}::time)`;
   refresh();
   redirect("/orario");
@@ -113,7 +91,7 @@ export async function deleteLesson(formData: FormData) {
   const id = uuidOrNull(formData.get("id"));
   if (!id) redirect("/orario");
 
-  await db`delete from lessons where id = ${id} and user_id = ${user.id}`;
+  await db()`delete from lessons where id = ${id} and user_id = ${user.id}`;
   refresh();
   redirect("/orario");
 }
@@ -136,7 +114,7 @@ export async function duplicateDay(formData: FormData) {
     redirect("/orario?err=copia");
   }
 
-  await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
+  await db()`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
            select user_id, subject_id, ${to}, start_time, end_time
            from lessons
            where user_id = ${user.id} and weekday = ${from}`;
