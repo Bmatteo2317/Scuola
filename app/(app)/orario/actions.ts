@@ -10,17 +10,16 @@ function refresh() {
   revalidatePath("/", "layout");
 }
 
-/** Imposta l'orario settimanale usando blocchi fissi di 1 ora.
- * Per ogni giorno (lun-dom) l'utente può selezionare quali ore scolastiche avere
- * e assegnare una materia a ciascun slot orario.
- * Gli slot sono: 07:00-08:00, 08:00-09:00, 09:00-10:00, 10:00-11:00, 11:00-12:00,
- * 12:00-13:00, 13:00-14:00, 14:00-15:00, 15:00-16:00, 16:00-17:00.
- * Vengono cancellate tutte le lezioni esistenti e sostituite con la nuova griglia.
+/** Imposta l'orario settimanale usando una griglia timetable.
+ *  Per ogni giorno (lun-dom) l'utente può selezionare quali ore scolastiche avere
+ *  e assegnare una materia a ciascun blocco orario.
+ *  La tabella mostra i blocchi orari 07:00-17:00 per ciascun giorno.
+ *  Vengono cancellate tutte le lezioni esistenti e sostituite con la nuova griglia.
  */
 export async function setWeeklySchedule(formData: FormData) {
   const user = await requireUser();
 
-  // Ore disponibili nella giornata scolastica (7:00 - 17:00 = 10 slot)
+  // Ore disponibili nella giornata scolastica (7:00 - 17:00 = 10 slot, ma userà 8 righe)
   const HOUR_SLOTS = [
     "07:00-08:00",
     "08:00-09:00",
@@ -58,7 +57,7 @@ export async function setWeeklySchedule(formData: FormData) {
   }
 
   // Elimina tutte le lezioni esistenti per questo utente
-  await db()`delete from lessons where user_id = ${user.id}`;
+  await db`delete from lessons where user_id = ${user.id}`;
 
   // Inserisci le nuove lezioni basate sulla griglia selezionata
   for (const day of daysSchedule) {
@@ -71,22 +70,9 @@ export async function setWeeklySchedule(formData: FormData) {
       const startTime = `${startH.padStart(2, "0")}:${startM}`;
       const endTime = `${endH.padStart(2, "0")}:${endM}`;
 
-      // Inserisci le nuove lezioni basate sulla griglia selezionata
-  for (const day of daysSchedule) {
-    for (let i = 0; i < day.selectedSubjectIds.length; i++) {
-      // Lo slot orario corrispondente: slotIdx 0 = 07:00-08:00, slotIdx 1 = 08:00-09:00, ecc.
-      const slotIdx = i; // i-esimo slot selezionato per questo giorno
-      const [startH, startM] = HOUR_SLOTS[slotIdx].split(":")[0].split("-");
-      const [endH, endM] = HOUR_SLOTS[slotIdx].split(":")[1].split("-");
-
-      const startTime = `${startH.padStart(2, "0")}:${startM}`;
-      const endTime = `${endH.padStart(2, "0")}:${endM}`;
-
-      // Inserisci usando raw query per evitare limiti del template tag
-      const sql = 'insert into lessons (user_id, subject_id, weekday, start_time, end_time) values (' + user.id + ', ' + day.selectedSubjectIds[i] + ', ' + day.weekday + ', ' + startTime + '::time, ' + endTime + '::time)');
-      await db.raw(sql);
-    }
-  }
+      // Costruisci la query separatamente per evitare troppi placeholder nel template tag
+      const query = db`insert into lessons (user_id, subject_id, weekday, start_time, end_time) values (${user.id}, ${day.selectedSubjectIds[i]}, ${day.weekday}, ${startTime}::time, ${endTime}::time)`;
+      await query;
     }
   }
 
@@ -109,13 +95,15 @@ export async function addLesson(formData: FormData) {
     redirect("/orario?err=orario");
   }
 
-  const subject = await row<{ id: string }>(
+  const subject = await row<
+    { id: string }
+  >(
     db`select id from subjects where id = ${subjectId} and user_id = ${user.id}`,
   );
   if (!subject) redirect("/orario");
 
   await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
-             values (${user.id}, ${subjectId}, ${weekday}, ${start}::time, ${end}::time)`;
+           values (${user.id}, ${subjectId}, ${weekday}, ${start}::time, ${end}::time)`;
   refresh();
   redirect("/orario");
 }
@@ -149,9 +137,9 @@ export async function duplicateDay(formData: FormData) {
   }
 
   await db`insert into lessons (user_id, subject_id, weekday, start_time, end_time)
-             select user_id, subject_id, ${to}, start_time, end_time
-             from lessons
-             where user_id = ${user.id} and weekday = ${from}`;
+           select user_id, subject_id, ${to}, start_time, end_time
+           from lessons
+           where user_id = ${user.id} and weekday = ${from}`;
   refresh();
   redirect("/orario");
 }
